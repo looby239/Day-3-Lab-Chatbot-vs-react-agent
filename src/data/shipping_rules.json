@@ -1,0 +1,10 @@
+[
+  {"destination": "Hanoi", "base_fee": 30000, "per_kg": 5000},
+  {"destination": "Ho Chi Minh City", "base_fee": 35000, "per_kg": 6000},
+  {"destination": "Da Nang", "base_fee": 40000, "per_kg": 7000},
+  {"destination": "Hai Phong", "base_fee": 32000, "per_kg": 5500},
+  {"destination": "Can Tho", "base_fee": 45000, "per_kg": 8000},
+  {"destination": "Hue", "base_fee": 42000, "per_kg": 7500},
+  {"destination": "Nha Trang", "base_fee": 48000, "per_kg": 8500},
+  {"destination": "Vung Tau", "base_fee": 38000, "per_kg": 6500}
+]
