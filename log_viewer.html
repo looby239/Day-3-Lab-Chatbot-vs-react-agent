@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lab 3 Log Viewer</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      color: #17202a;
+      background: #f6f7f9;
+    }
+    header {
+      padding: 16px 24px;
+      background: #ffffff;
+      border-bottom: 1px solid #d8dee6;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0;
+    }
+    main {
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+    }
+    .panel {
+      background: #ffffff;
+      border: 1px solid #d8dee6;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .stats {
+      display: grid;
+      gap: 10px;
+    }
+    .stat {
+      border: 1px solid #e4e8ee;
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .label {
+      color: #607086;
+      font-size: 12px;
+    }
+    .value {
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid #e4e8ee;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f0f3f7;
+      color: #314055;
+      position: sticky;
+      top: 0;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+    }
+    input[type="file"] {
+      max-width: 280px;
+    }
+    @media (max-width: 820px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Lab 3 Demo Log Viewer</h1>
+    <input id="fileInput" type="file" accept=".log,.json,.jsonl">
+  </header>
+  <main>
+    <section class="panel stats">
+      <div class="stat">
+        <div class="label">Rows</div>
+        <div class="value" id="rowCount">0</div>
+      </div>
+      <div class="stat">
+        <div class="label">Events</div>
+        <div class="value" id="eventCount">0</div>
+      </div>
+      <div class="stat">
+        <div class="label">Pass Rate</div>
+        <div class="value" id="passRate">N/A</div>
+      </div>
+    </section>
+    <section class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const rows = document.getElementById("rows");
+    const rowCount = document.getElementById("rowCount");
+    const eventCount = document.getElementById("eventCount");
+    const passRate = document.getElementById("passRate");
+
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      render(parseFile(await file.text()));
+    });
+
+    function parseFile(text) {
+      const trimmed = text.trim();
+      if (!trimmed) return [];
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed;
+        if (parsed.chatbot || parsed.agent) {
+          return Object.entries(parsed).flatMap(([mode, cases]) =>
+            cases.map(item => ({ event: mode, data: item }))
+          );
+        }
+        return [parsed];
+      } catch {
+        return trimmed.split(/\r?\n/).map(line => {
+          const jsonStart = line.indexOf("{");
+          const payload = jsonStart >= 0 ? line.slice(jsonStart) : line;
+          try {
+            return JSON.parse(payload);
+          } catch {
+            return { event: "raw", data: line };
+          }
+        });
+      }
+    }
+
+    function render(items) {
+      rows.innerHTML = "";
+      rowCount.textContent = items.length;
+      eventCount.textContent = new Set(items.map(item => item.event || item.name || "row")).size;
+      const scored = items.filter(item => item.data && typeof item.data.success === "boolean");
+      passRate.textContent = scored.length
+        ? `${Math.round(scored.filter(item => item.data.success).length / scored.length * 100)}%`
+        : "N/A";
+
+      for (const item of items) {
+        const tr = document.createElement("tr");
+        const time = item.timestamp || "";
+        const type = item.event || item.name || "row";
+        const details = item.data || item;
+        tr.innerHTML = `<td>${escapeHtml(time)}</td><td>${escapeHtml(type)}</td><td><pre>${escapeHtml(JSON.stringify(details, null, 2))}</pre></td>`;
+        rows.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+  </script>
+</body>
+</html>

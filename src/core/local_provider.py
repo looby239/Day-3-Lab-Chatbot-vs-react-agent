@@ -19,6 +19,7 @@ class LocalProvider(LLMProvider):
         """
         super().__init__(model_name=os.path.basename(model_path))
         
+        
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found at {model_path}. Please download it first.")
 
