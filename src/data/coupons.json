@@ -1,0 +1,9 @@
+[
+  {"code": "WINNER", "discount_percent": 10, "min_order_value": 10000000, "active": true},
+  {"code": "WELCOME", "discount_percent": 5, "min_order_value": 0, "active": true},
+  {"code": "FREESHIP", "discount_percent": 0, "min_order_value": 5000000, "active": true, "note": "Giam phi van chuyen, implement sau"},
+  {"code": "EXPIRED", "discount_percent": 20, "min_order_value": 1000000, "active": false},
+  {"code": "BLACKFRIDAY", "discount_percent": 15, "min_order_value": 20000000, "active": true},
+  {"code": "STUDENT", "discount_percent": 7, "min_order_value": 2000000, "active": true},
+  {"code": "BIGSALE", "discount_percent": 12, "min_order_value": 15000000, "active": true}
+]
