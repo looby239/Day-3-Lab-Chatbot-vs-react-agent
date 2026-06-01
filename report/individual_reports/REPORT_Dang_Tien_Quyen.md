@@ -1,6 +1,6 @@
 # Báo cáo Cá nhân: Bài Thực Hành 3 - Chatbot vs Tác tử ReAct
 
-- **Họ và Tên Sinh viên**: Đặng Tiến Quyến (Trưởng nhóm Đánh giá & Đo lường)
+- **Họ và Tên Sinh viên**: Đặng Tiến Quyền
 - **Mã Sinh viên**: 2S202600896
 - **Ngày thực hiện**: 2026-06-01
 
