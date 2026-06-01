@@ -1,0 +1,136 @@
+# Báo Cáo Cá Nhân: Lab 3 - Chatbot vs ReAct Agent
+
+- **Họ và Tên**: Nguyễn Quang Huy
+- **Mã Sinh Viên**: 2A202600788
+- **Ngày**: 01/06/2026
+
+---
+
+## I. Đóng Góp Kỹ Thuật (15 Điểm)
+
+### Các Module Đã Triển Khai
+
+- `src/agent/agent.py` — ReAct Agent core
+- `src/agent/parser.py` — Parser tách riêng để parse output của LLM
+
+### Mô Tả Chi Tiết
+
+**`src/agent/parser.py`**
+
+Tách toàn bộ logic parse output của Phi-3 thành 3 hàm độc lập:
+
+```python
+def parse_thought(text: str) -> Optional[str]: ...
+def parse_final_answer(text: str) -> Optional[str]: ...
+def parse_action(text: str) -> Tuple[Optional[str], str]: ...
+```
+
+Mỗi hàm dùng regex với fallback pattern để xử lý trường hợp Phi-3 output không hoàn toàn đúng format. Ví dụ `parse_action` có 2 pattern: strict `({...})` và fallback `(...)` để bắt cả khi model bỏ sót dấu ngoặc nhọn.
+
+**`src/agent/agent.py`**
+
+Triển khai vòng lặp ReAct đầy đủ trong method `run()`:
+
+```python
+for step in range(1, self.max_steps + 1):
+    response = self.llm.generate(conversation, system_prompt=...)
+    thought      = parse_thought(response)
+    final_answer = parse_final_answer(response)
+    action_name, action_args_str = parse_action(response)
+
+    if final_answer:
+        return self._build_result(...)      # dừng loop
+    if action_name:
+        observation = self._execute_tool(action_name, action_args_str)
+        conversation += f"\nObservation: {observation}\n"  # tích luỹ context
+```
+
+Method `_execute_tool()` xử lý toàn bộ error path: tool không tồn tại, JSON sai, thiếu argument, runtime exception — tất cả đều trả về JSON error string thay vì crash.
+
+Hàm `run()` trả về `dict` thay vì plain string để Người 4 (UX) có thể hiển thị trace từng bước:
+
+```python
+{
+    "answer": "...",
+    "trace": [{"step": 1, "thought": "...", "action": "...", "observation": "..."}, ...],
+    "steps": 3,
+    "error": None,
+    "latency_s": 1.42
+}
+```
+
+### Tương Tác Với ReAct Loop
+
+`agent.py` là cầu nối giữa tất cả các thành phần: nhận `RETAIL_TOOLS` từ Người 1, gọi Phi-3 provider từ Người 3, emit log events cho Người 5 phân tích, và trả structured trace cho Người 4 hiển thị. Nếu không có Agent, model chỉ là chatbot thông thường — không có tool calling, không có Observation, không phân biệt được với baseline.
+
+---
+
+## II. Case Study Debug (10 Điểm)
+
+### Mô Tả Vấn Đề
+
+Trong quá trình test, Agent bị lặp vô hạn khi Phi-3 liên tục gọi cùng một action mà không tiến tới Final Answer:
+
+```
+Action: search_product({"product_name": "iPhone 15"})
+Observation: [{"id": "p001", ...}]
+Action: search_product({"product_name": "iPhone 15"})   ← lặp lại
+Observation: [{"id": "p001", ...}]
+...
+```
+
+### Log Source
+
+```
+[AGENT_STEP] step=1
+[TOOL_CALL]  tool=search_product args={"product_name": "iPhone 15"}
+[TOOL_RESULT] result=[{"id": "p001", "name": "iPhone 15", ...}]
+[AGENT_STEP] step=2
+[TOOL_CALL]  tool=search_product args={"product_name": "iPhone 15"}
+[TOOL_RESULT] result=[{"id": "p001", "name": "iPhone 15", ...}]
+[AGENT_ERROR] error=max_steps exceeded steps=5
+```
+
+### Chẩn Đoán
+
+Nguyên nhân nằm ở system prompt ban đầu chưa đủ rõ ràng — Phi-3 không hiểu rằng sau khi đã có `product_id` từ `search_product` thì bước tiếp theo phải là `check_stock`. Model nhỏ như Phi-3-mini không tự suy luận được chuỗi multi-step nếu prompt không có ví dụ cụ thể.
+
+### Giải Pháp
+
+Thêm vào system prompt một ví dụ end-to-end hoàn chỉnh thể hiện đúng chuỗi `search_product` → `check_stock` → `get_discount` → `calc_shipping` → `Final Answer`, đồng thời thêm rule: *"Do not repeat the same tool call twice with the same arguments."* Sau khi cập nhật prompt, Agent chạy đúng luồng và kết thúc trong 4 bước.
+
+---
+
+## III. Nhận Xét Cá Nhân: Chatbot vs ReAct (10 Điểm)
+
+### 1. Khả Năng Suy Luận
+
+Block `Thought` buộc model phải *lập kế hoạch* trước khi hành động. Chatbot baseline trả lời ngay lập tức dựa trên pattern trong training data, dẫn đến bịa giá và tồn kho. Agent với `Thought` biết rằng "mình cần tìm product_id trước, rồi mới kiểm tra stock được" — đây là bước suy luận mà chatbot không làm được.
+
+### 2. Trường Hợp Agent Tệ Hơn Chatbot
+
+Agent thực sự kém hơn trong các câu hỏi đơn giản như *"iPhone 15 là gì?"* hay *"tư vấn cho tôi nên mua điện thoại nào?"*. Những câu này không cần tool, nhưng Agent vẫn cố gắng gọi `search_product`, mất thêm 2–3 giây và đôi khi trả lời lan man hơn chatbot. Chatbot baseline lại trả lời tự nhiên và nhanh hơn cho những câu hỏi tư vấn chung.
+
+### 3. Vai Trò Của Observation
+
+Observation là phần quan trọng nhất trong loop — nó là "thực tế" mà Agent dựa vào. Khi `check_stock` trả về `{"in_stock": false, "available": 1}` trong khi user yêu cầu 2 sản phẩm, Agent tự điều chỉnh Final Answer để thông báo hết hàng thay vì cứ tính tiền bình thường. Chatbot baseline không có cơ chế này — nó sẽ tính tiền và xác nhận có hàng dù thực tế không có.
+
+---
+
+## IV. Hướng Cải Thiện (5 Điểm)
+
+### Scalability
+
+Hiện tại các tool call chạy tuần tự — bước sau phải chờ bước trước xong. Trong production, nên dùng **async tool execution**: những tool không phụ thuộc nhau (ví dụ `check_stock` và `calc_shipping`) có thể chạy song song với `asyncio`, giảm latency đáng kể khi có nhiều tool trong một request.
+
+### Safety
+
+Thêm một **Supervisor LLM** nhỏ chạy song song, có nhiệm vụ kiểm tra xem Agent có đang gọi tool với argument bất thường không (ví dụ `quantity: 99999` hay `destination: "'; DROP TABLE --"`). Supervisor từ chối action nếu phát hiện bất thường trước khi tool thực sự chạy.
+
+### Performance
+
+Khi hệ thống có hàng trăm tool, việc đưa toàn bộ tool description vào system prompt sẽ vượt context window. Giải pháp là dùng **Vector DB** (FAISS, ChromaDB) để embed tool descriptions, sau đó retrieval top-k tool phù hợp nhất với câu hỏi của user trước khi build prompt — tương tự RAG nhưng cho tool selection.
+
+---
+
+> Báo cáo được nộp với tên file `REPORT_NguyenQuangHuy.md` đặt trong thư mục `report/individual_reports/`.
