@@ -54,3 +54,42 @@ The code is designed as a **Production Prototype**. It includes:
 ---
 
 *Happy Coding! Let's build agents that actually work.*
+
+## Local Phi-3, Baseline, And Demo Handoff
+
+### Test Phi-3 Local
+```bash
+python tests\test_local.py
+```
+
+If Windows reports `access violation reading 0x0000000000000000`, the crash is happening inside the native `llama.cpp` DLL before the model is loaded. Reinstall the CPU wheel:
+```bash
+python -m pip install --force-reinstall --no-cache-dir --only-binary=:all: llama-cpp-python==0.2.90 --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+```
+
+### Run Chatbot Baseline
+The baseline calls Phi-3 directly and does not use tools:
+```bash
+python chatbot_baseline.py
+```
+
+Try failure-prone questions such as:
+```text
+Tôi muốn mua 2 iPhone 15, dùng mã WINNER, giao đến Hà Nội. Tổng tiền là bao nhiêu và còn hàng không?
+```
+
+### Compare Chatbot vs Agent
+Use mock mode for deterministic lab metrics:
+```bash
+python compare_chatbot_agent.py mock
+```
+
+Use local mode after Phi-3 is working:
+```bash
+python compare_chatbot_agent.py local
+```
+
+Results are written to `logs/baseline_vs_agent.json`.
+
+### UX Demo Log Viewer
+Open `log_viewer.html` in a browser and choose either `logs/baseline_vs_agent.json` or a daily log file from `logs/`.
