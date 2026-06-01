@@ -20,8 +20,8 @@ def test_local_phi3():
         return
 
     try:
-        provider = LocalProvider(model_path=model_path)
         
+        provider = LocalProvider(model_path=model_path)
         prompt = "Explain what an AI Agent is in one sentence."
         print(f"\nUser: {prompt}")
         print("Assistant: ", end="", flush=True)
