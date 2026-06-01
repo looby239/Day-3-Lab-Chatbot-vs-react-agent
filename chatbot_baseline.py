@@ -15,6 +15,8 @@ Answer the user directly using only your model knowledge.
 Do not call tools, do not invent tool observations, and do not use ReAct format.
 If the question needs live store data such as exact stock, coupons, or shipping,
 give your best direct answer and mention that it was not verified by tools.
+If the user asks for delivery or shipping, explicitly include a shipping line.
+If you cannot verify the shipping fee, write: "Shipping fee: not verified by baseline because no tools/data were used."
 """
 
 
@@ -40,10 +42,27 @@ def ask_chatbot(provider, user_input: str) -> str:
     logger.log_event("CHATBOT_BASELINE_START", {"input": user_input, "model": provider.model_name})
     result = provider.generate(user_input, system_prompt=BASELINE_SYSTEM_PROMPT)
     content = result["content"].replace("Final Answer:", "").strip()
+    content = _ensure_baseline_fields(user_input, content)
     latency_ms = result.get("latency_ms", int((time.time() - start) * 1000))
     usage = result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
     tracker.track_request(result.get("provider", os.getenv("DEFAULT_PROVIDER", "local")), provider.model_name, usage, latency_ms)
     logger.log_event("CHATBOT_BASELINE_END", {"success": True, "output": content})
+    return content
+
+
+def _ensure_baseline_fields(user_input: str, content: str) -> str:
+    lowered_input = user_input.lower()
+    lowered_content = content.lower()
+    asks_shipping = any(term in lowered_input for term in ["giao", "ship", "shipping", "delivery", "hanoi", "ha noi", "hà nội"])
+    mentions_shipping = any(term in lowered_content for term in ["ship", "shipping", "delivery", "giao", "vận chuyển", "van chuyen"])
+
+    if asks_shipping and not mentions_shipping:
+        content = (
+            f"{content}\n\n"
+            "Shipping fee: not verified by baseline because no tools/data were used. "
+            "Use ReAct Agent mode to calculate shipping from src/data/shipping_rules.json."
+        )
+
     return content
 
 

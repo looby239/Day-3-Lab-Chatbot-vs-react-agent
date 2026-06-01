@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from typing import Any, Dict, List, Optional
 
 from src.agent.agent import ReActAgent
@@ -8,7 +9,7 @@ from src.core.mock_provider import MockProvider
 from src.core.provider_factory import get_provider
 from src.telemetry.logger import logger
 from src.telemetry.metrics import tracker
-from src.tools.store_tools import TOOLS_METADATA
+from src.tools.retail_tools import TOOLS_METADATA, search_product, check_stock, get_discount, calc_shipping
 
 
 _providers: Dict[str, LLMProvider] = {}
@@ -116,6 +117,9 @@ def run_agent(question: str, version: str = "v1") -> Dict[str, Any]:
         "trace": [...]
     }
     """
+    if os.getenv("UX_PROVIDER", "").strip().lower() == "data":
+        return _run_data_demo(question, version)
+
     normalized_version = "v2" if str(version).lower() == "v2" else "v1"
     provider = _build_provider(normalized_version)
     tools = _build_tools()
@@ -168,3 +172,136 @@ def run_agent(question: str, version: str = "v1") -> Dict[str, Any]:
         "provider": provider.model_name,
         "version": normalized_version,
     }
+
+
+def _json_loads(payload: str) -> Dict[str, Any]:
+    try:
+        value = json.loads(payload)
+        return value if isinstance(value, dict) else {"value": value}
+    except Exception:
+        return {"raw": payload}
+
+
+def _run_data_demo(question: str, version: str = "v2") -> Dict[str, Any]:
+    normalized = question.lower()
+    product_query = "iPhone 15"
+    quantity = 2 if re.search(r"\b2\b|hai", normalized) else 1
+    coupon = "WINNER" if "winner" in normalized else "WELCOME" if "welcome" in normalized else ""
+    destination = "Hanoi" if any(city in normalized for city in ["ha noi", "hanoi", "hà nội"]) else "Ho Chi Minh City"
+
+    trace: List[Dict[str, Any]] = []
+
+    search_raw = search_product(product_query)
+    search_data = _json_loads(search_raw)
+    products = search_data.get("products", [])
+    selected = _select_product(products, product_query)
+    trace.append(
+        {
+            "step": 1,
+            "event": "TOOL_CALL",
+            "thought": "Tim san pham trong src/data/products.json.",
+            "action": "search_product",
+            "tool_input": {"product_name": product_query},
+            "observation": search_raw,
+        }
+    )
+
+    if not selected:
+        return {
+            "answer": f"Khong tim thay san pham phu hop voi '{product_query}' trong data.",
+            "trace": trace,
+            "provider": "data-demo",
+            "version": version,
+        }
+
+    stock_raw = check_stock(selected["id"], quantity)
+    stock_data = _json_loads(stock_raw)
+    trace.append(
+        {
+            "step": 2,
+            "event": "TOOL_CALL",
+            "thought": "Kiem tra ton kho bang product_id lay tu data.",
+            "action": "check_stock",
+            "tool_input": {"product_id": selected["id"], "quantity": quantity},
+            "observation": stock_raw,
+        }
+    )
+
+    subtotal = selected["price"] * quantity
+    discount_amount = 0
+    discount_note = "Khong dung ma giam gia."
+    if coupon:
+        discount_raw = get_discount(coupon, subtotal)
+        discount_data = _json_loads(discount_raw)
+        discount_amount = int(discount_data.get("discount_amount", 0)) if discount_data.get("valid") else 0
+        discount_note = (
+            f"Ma {coupon} hop le, giam {discount_amount:,} VND."
+            if discount_data.get("valid")
+            else f"Ma {coupon} khong ap dung: {discount_data.get('message', 'khong hop le')}."
+        )
+        trace.append(
+            {
+                "step": 3,
+                "event": "TOOL_CALL",
+                "thought": "Ap ma giam gia tu src/data/coupons.json.",
+                "action": "get_discount",
+                "tool_input": {"coupon_code": coupon, "order_value": subtotal},
+                "observation": discount_raw,
+            }
+        )
+
+    total_weight = selected["weight_kg"] * quantity
+    shipping_raw = calc_shipping(total_weight, destination)
+    shipping_data = _json_loads(shipping_raw)
+    shipping_fee = int(shipping_data.get("shipping_fee", 0))
+    trace.append(
+        {
+            "step": len(trace) + 1,
+            "event": "TOOL_CALL",
+            "thought": "Tinh phi giao hang tu src/data/shipping_rules.json.",
+            "action": "calc_shipping",
+            "tool_input": {"weight_kg": total_weight, "destination": destination},
+            "observation": shipping_raw,
+        }
+    )
+
+    final_total = subtotal - discount_amount + shipping_fee
+    availability = (
+        f"con hang, kho co {stock_data.get('available')} san pham"
+        if stock_data.get("in_stock")
+        else f"khong du hang, kho chi co {stock_data.get('available')} san pham"
+    )
+    answer = (
+        f"Theo data trong src/data: {selected['name']} {availability}. "
+        f"Tam tinh {quantity} san pham: {subtotal:,} VND. "
+        f"{discount_note} Phi ship den {destination}: {shipping_fee:,} VND. "
+        f"Tong thanh toan: {final_total:,} VND."
+    )
+
+    trace.append(
+        {
+            "step": len(trace) + 1,
+            "event": "FINAL_ANSWER",
+            "thought": "Tong hop ket qua tu cac tool doc JSON data.",
+            "action": "return_answer",
+            "tool_input": {},
+            "observation": answer,
+        }
+    )
+
+    return {"answer": answer, "trace": trace, "provider": "data-demo", "version": version}
+
+
+def _select_product(products: List[Dict[str, Any]], product_query: str) -> Optional[Dict[str, Any]]:
+    if not products:
+        return None
+
+    query = product_query.lower()
+    for product in products:
+        if product.get("name", "").lower() == query:
+            return product
+    for product in products:
+        name = product.get("name", "").lower()
+        if query in name and "pro" not in name and "max" not in name:
+            return product
+    return products[0]

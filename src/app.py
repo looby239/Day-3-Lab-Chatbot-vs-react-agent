@@ -45,6 +45,10 @@ def _init_session() -> None:
     st.session_state.setdefault("last_trace", [])
     st.session_state.setdefault("last_error", None)
     st.session_state.setdefault("draft_question", SCENARIOS["Tính tổng đơn hàng"])
+    st.session_state.setdefault("backend_mode", "Fast data demo (no Phi-3)")
+    st.session_state.setdefault("pending_request", None)
+    if st.session_state.backend_mode == "Data demo (uses src/data)":
+        st.session_state.backend_mode = "Fast data demo (no Phi-3)"
 
 
 def _mock_trace(question: str, mode: str) -> Dict[str, Any]:
@@ -147,7 +151,17 @@ def _try_real_agent(question: str, version: str) -> Optional[Dict[str, Any]]:
 
 
 def run_question(question: str, mode: str) -> Dict[str, Any]:
+    backend_mode = st.session_state.get("backend_mode", "Fast demo (mock)")
+    if backend_mode.startswith("Fast data demo") or backend_mode.startswith("Data demo"):
+        os.environ["UX_PROVIDER"] = "data"
+    elif backend_mode.startswith("Fast mock"):
+        os.environ["UX_PROVIDER"] = "mock"
+    else:
+        os.environ.pop("UX_PROVIDER", None)
+
     if mode == "Chatbot Baseline":
+        if backend_mode.startswith("Fast data demo"):
+            return _mock_trace(question, mode)
         result = _try_real_baseline(question)
     else:
         version = "v2" if mode == "ReAct Agent v2" else "v1"
@@ -250,9 +264,29 @@ def _submit_question(question: str, mode: str) -> None:
         return
 
     st.session_state.messages.append({"role": "user", "content": clean_question})
+    st.session_state.pending_request = {"question": clean_question, "mode": mode}
+    st.rerun()
+
+
+def _process_pending_request() -> None:
+    pending = st.session_state.get("pending_request")
+    if not pending:
+        return
+
+    clean_question = pending["question"]
+    mode = pending["mode"]
     started_at = datetime.now()
     status = st.status(_thinking_message(mode), expanded=True)
     status.write("Nhan cau hoi va chuan bi context.")
+    if st.session_state.get("backend_mode", "").startswith("Official"):
+        status.write(
+            "Dang chay dung luong guideline: Phi-3 local sinh cau tra loi/action. "
+            "Voi ReAct Agent, moi step la mot lan goi provider trong .env nen co the mat vai giay."
+        )
+    elif st.session_state.get("backend_mode", "").startswith("Fast data demo"):
+        status.write("Dang dung demo nhanh: bo qua Phi-3, goi tool doc truc tiep src/data/*.json.")
+    else:
+        status.write("Dang dung mock backend de demo nhanh va tranh treo UI.")
     if mode != "Chatbot Baseline":
         status.write("Dang cho Agent sinh Thought/Action va thuc thi tool neu can.")
 
@@ -272,6 +306,8 @@ def _submit_question(question: str, mode: str) -> None:
         )
         st.session_state.last_trace = result["trace"]
         st.session_state.last_error = None
+        st.session_state.pending_request = None
+        st.rerun()
     except Exception as exc:
         elapsed_ms = int((datetime.now() - started_at).total_seconds() * 1000)
         error_message = str(exc)
@@ -291,6 +327,8 @@ def _submit_question(question: str, mode: str) -> None:
                 "latency_ms": elapsed_ms,
             }
         )
+        st.session_state.pending_request = None
+        st.rerun()
 
 
 def main() -> None:
@@ -307,6 +345,30 @@ def main() -> None:
             ["Chatbot Baseline", "ReAct Agent v1", "ReAct Agent v2"],
             label_visibility="collapsed",
         )
+
+        st.subheader("Backend")
+        st.session_state.backend_mode = st.radio(
+            "Chon backend",
+            [
+                "Official lab flow (.env provider + src/data tools)",
+                "Fast data demo (no Phi-3)",
+                "Fast mock demo",
+            ],
+            index=(
+                0
+                if st.session_state.backend_mode.startswith("Official")
+                else 1
+                if st.session_state.backend_mode.startswith("Fast data")
+                else 2
+            ),
+            label_visibility="collapsed",
+        )
+        if st.session_state.backend_mode.startswith("Official"):
+            st.warning("Dung guideline: Chatbot/Agent goi provider tu .env. Agent se dung tools doc src/data.")
+        elif st.session_state.backend_mode.startswith("Fast data"):
+            st.success("Demo nhanh: Agent bo qua Phi-3 va goi tools doc src/data truc tiep.")
+        else:
+            st.success("Demo mock: nhanh nhung khong dung src/data.")
 
         st.subheader("Scenario")
         for label, prompt in SCENARIOS.items():
@@ -331,10 +393,11 @@ def main() -> None:
                 if message["role"] == "assistant" and message.get("latency_ms") is not None:
                     st.caption(f"{message.get('mode')} | {message['latency_ms']} ms")
 
+        _process_pending_request()
+
         question = st.chat_input("Nhập câu hỏi...")
         if question:
             _submit_question(question, mode)
-            st.rerun()
 
         with st.form("scenario_form"):
             draft = st.text_area("Cau hoi demo", value=st.session_state.draft_question, height=90)
@@ -342,7 +405,6 @@ def main() -> None:
             if submitted:
                 st.session_state.draft_question = draft
                 _submit_question(draft, mode)
-                st.rerun()
 
     with log_col:
         st.subheader("Trace & Logs")

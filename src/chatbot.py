@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 
 from chatbot_baseline import ask_chatbot
@@ -8,15 +9,23 @@ from src.telemetry.logger import logger
 
 
 _provider: Optional[LLMProvider] = None
+_provider_mode: Optional[str] = None
 
 
 def _get_baseline_provider() -> LLMProvider:
-    global _provider
-    if _provider is not None:
+    global _provider, _provider_mode
+    provider_mode = os.getenv("UX_PROVIDER", "").strip().lower()
+    if _provider is not None and _provider_mode == provider_mode:
+        return _provider
+
+    if provider_mode == "mock":
+        _provider = MockProvider(mode="chatbot")
+        _provider_mode = provider_mode
         return _provider
 
     try:
         _provider = get_provider()
+        _provider_mode = provider_mode
         return _provider
     except Exception as exc:
         logger.log_event(
@@ -24,6 +33,7 @@ def _get_baseline_provider() -> LLMProvider:
             {"mode": "chatbot", "reason": str(exc), "fallback": "MockProvider(chatbot)"},
         )
         _provider = MockProvider(mode="chatbot")
+        _provider_mode = provider_mode
         return _provider
 
 
