@@ -56,6 +56,24 @@ def calc_shipping(weight_kg: float, destination: str):
     fee = 50000 + (10000 * weight_kg)
     return {"destination": destination, "shipping_fee": fee, "note": "City not in list, using default rates"}
 
+# Global variable to simulate a session-based cart
+_CART = {"items": [], "total_weight": 0.0, "total_value": 0.0}
+
+def manage_cart(action: str, product_id: str = None, quantity: int = 1, price: float = 0.0, weight_kg: float = 0.0):
+    """Manage the shopping cart. Actions: 'add', 'clear', 'show'. Input JSON: {\"action\": string, \"product_id\": string, \"quantity\": integer, \"price\": float, \"weight_kg\": float}."""
+    global _CART
+    if action == "add":
+        _CART["items"].append({"product_id": product_id, "quantity": quantity})
+        _CART["total_weight"] += weight_kg * quantity
+        _CART["total_value"] += price * quantity
+        return {"message": f"Added {quantity} of {product_id} to cart.", "cart_summary": _CART}
+    elif action == "clear":
+        _CART = {"items": [], "total_weight": 0.0, "total_value": 0.0}
+        return {"message": "Cart cleared."}
+    elif action == "show":
+        return _CART
+    return "Invalid action. Use 'add', 'clear', or 'show'."
+
 RETAIL_TOOLS = [
     {
         "name": "search_product",
@@ -74,7 +92,12 @@ RETAIL_TOOLS = [
     },
     {
         "name": "calc_shipping",
-        "description": "Calculate shipping costs. Input: {'weight_kg': float, 'destination': string}",
+        "description": "Calculate shipping costs. Input MUST be valid JSON: {'weight_kg': float (ONLY numbers), 'destination': string}",
         "function": calc_shipping,
+    },
+    {
+        "name": "manage_cart",
+        "description": "Add items to cart or view cart status. Use 'add' to update totals. Input: {'action': 'add'|'clear'|'show', 'product_id': string, 'quantity': int, 'price': float, 'weight_kg': float}",
+        "function": manage_cart,
     }
 ]
