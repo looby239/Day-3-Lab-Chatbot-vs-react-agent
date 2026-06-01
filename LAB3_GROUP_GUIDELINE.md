@@ -175,9 +175,71 @@ Chay model local va tao chatbot thuong de so sanh voi Agent.
 
 ```text
 .env
+src/core/provider_factory.py
 src/chatbot.py
 src/run_demo.py
 ```
+
+### Phan viec trong `src/core/`
+
+Nguoi 3 phu trach ket noi model Phi-3 local voi phan con lai cua he thong. Cac file core hien co da co san interface va provider, nen **khong can sua nhieu** neu Phi-3 chay on:
+
+```text
+src/core/llm_provider.py       # Interface chung, thuong khong can sua
+src/core/local_provider.py     # Provider chay Phi-3 local, chi sua neu can config them
+src/core/openai_provider.py    # Khong can sua neu lab chi dung Phi-3
+src/core/gemini_provider.py    # Khong can sua neu lab chi dung Phi-3
+```
+
+Nguoi 3 nen tao them:
+
+```text
+src/core/provider_factory.py
+```
+
+Muc dich: load provider theo `.env`, de `src/chatbot.py`, `src/run_demo.py`, Agent va UX deu dung chung mot cach khoi tao model.
+
+Goi y noi dung:
+
+```python
+import os
+from dotenv import load_dotenv
+from src.core.local_provider import LocalProvider
+from src.core.openai_provider import OpenAIProvider
+from src.core.gemini_provider import GeminiProvider
+
+
+def get_provider():
+    load_dotenv()
+    provider = os.getenv("DEFAULT_PROVIDER", "local")
+
+    if provider == "local":
+        model_path = os.getenv("LOCAL_MODEL_PATH", "./models/Phi-3-mini-4k-instruct-q4.gguf")
+        return LocalProvider(model_path=model_path)
+
+    if provider == "openai":
+        return OpenAIProvider(
+            model_name=os.getenv("DEFAULT_MODEL", "gpt-4o"),
+            api_key=os.getenv("OPENAI_API_KEY"),
+        )
+
+    if provider == "google":
+        return GeminiProvider(
+            model_name=os.getenv("DEFAULT_MODEL", "gemini-1.5-flash"),
+            api_key=os.getenv("GEMINI_API_KEY"),
+        )
+
+    raise ValueError(f"Unsupported provider: {provider}")
+```
+
+Chi sua `src/core/local_provider.py` neu gap cac van de sau:
+
+- Phi-3 tra loi bi cat som do `stop`.
+- Can tang/giam `max_tokens`.
+- Can chinh `n_ctx` hoac `n_threads`.
+- Can log them latency/token ngay trong provider.
+
+Neu khong gap cac loi tren thi giu nguyen `src/core/local_provider.py`.
 
 ### Dau viec
 
@@ -208,21 +270,32 @@ LOCAL_MODEL_PATH=./models/Phi-3-mini-4k-instruct-q4.gguf
 python tests\test_local.py
 ```
 
-4. Tao `src/chatbot.py`
+4. Tao `src/core/provider_factory.py`
+   - Doc `.env`.
+   - Neu `DEFAULT_PROVIDER=local` thi tra ve `LocalProvider`.
+   - Dung `LOCAL_MODEL_PATH` de load Phi-3.
+   - File nay la diem noi chung cho chatbot, agent va demo runner.
+
+5. Tao `src/chatbot.py`
    - Chatbot baseline chi goi Phi-3 truc tiep.
    - Khong dung tool.
    - Dung de chung minh chatbot de bia gia, ton kho, phi ship.
+   - Nen import provider tu `src/core/provider_factory.py`.
 
-5. Tao `src/run_demo.py`
+6. Tao `src/run_demo.py`
    - Load Phi-3 provider.
    - Load chatbot baseline.
    - Load ReAct Agent.
    - Load `RETAIL_TOOLS`.
    - Cho phep chay thu tu terminal.
+   - Nen import provider tu `src/core/provider_factory.py`.
 
 Vi du nhiem vu cua `run_demo.py`:
 
 ```python
+from src.core.provider_factory import get_provider
+
+provider = get_provider()
 provider = LocalProvider(model_path)
 agent = ReActAgent(llm=provider, tools=RETAIL_TOOLS)
 
